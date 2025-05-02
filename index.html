@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COVID-19 Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f7fa;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #2980b9;
+            margin-top: 30px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .stat-box {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border-left: 4px solid #3498db;
+            transition: transform 0.3s ease;
+        }
+        .stat-box:hover {
+            transform: translateY(-5px);
+        }
+        .stat-box.confirmed {
+            border-left-color: #f39c12;
+        }
+        .stat-box.deaths {
+            border-left-color: #e74c3c;
+        }
+        .stat-box.recovered {
+            border-left-color: #2ecc71;
+        }
+        .stat-box.active {
+            border-left-color: #3498db;
+        }
+        .stat-box h3 {
+            margin: 0 0 10px 0;
+            color: #7f8c8d;
+            font-size: 16px;
+        }
+        .stat-box p {
+            font-size: 28px;
+            margin: 0;
+            font-weight: bold;
+        }
+        .country-selector {
+            margin: 30px 0;
+            text-align: center;
+        }
+        select {
+            padding: 12px 20px;
+            font-size: 16px;
+            width: 100%;
+            max-width: 400px;
+            border: 2px solid #bdc3c7;
+            border-radius: 6px;
+            background-color: #f8f9fa;
+            transition: border-color 0.3s;
+        }
+        select:focus {
+            border-color: #3498db;
+            outline: none;
+        }
+        button {
+            display: block;
+            margin: 30px auto;
+            padding: 12px 25px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .loading {
+            text-align: center;
+            padding: 30px;
+            font-style: italic;
+            color: #7f8c8d;
+            font-size: 18px;
+        }
+        .error {
+            color: #e74c3c;
+            text-align: center;
+            padding: 20px;
+            background-color: #fadbd8;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .last-updated {
+            text-align: center;
+            color: #95a5a6;
+            font-style: italic;
+            margin-top: 20px;
+        }
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+            .stat-box p {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>COVID-19 Statistics Dashboard</h1>
+        
+        <div class="global-stats">
+            <h2>Global Statistics</h2>
+            <div class="stats-grid" id="globalStats">
+                <div class="loading">Loading global data...</div>
+            </div>
+            <div id="globalLastUpdated" class="last-updated"></div>
+        </div>
+
+        <div class="country-selector">
+            <select id="countrySelect">
+                <option value="">Select a Country</option>
+            </select>
+        </div>
+
+        <div class="country-stats">
+            <h2>Country Statistics</h2>
+            <div class="stats-grid" id="countryStats"></div>
+            <div id="countryLastUpdated" class="last-updated"></div>
+        </div>
+
+        <button id="refreshBtn">Refresh Data</button>
+    </div>
+
+    <script>
+        // Primary API - disease.sh is currently more reliable than COVID19API
+        const API_BASE = 'https://disease.sh/v3/covid-19/';
+        
+        // DOM elements
+        const countrySelect = document.getElementById('countrySelect');
+        const globalStatsDiv = document.getElementById('globalStats');
+        const countryStatsDiv = document.getElementById('countryStats');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const globalLastUpdated = document.getElementById('globalLastUpdated');
+        const countryLastUpdated = document.getElementById('countryLastUpdated');
+
+        // Format date for display
+        function formatDate(timestamp) {
+            if (!timestamp) return 'Unknown';
+            const date = new Date(timestamp);
+            return date.toLocaleString();
+        }
+
+        // Show loading state
+        function showLoading(element) {
+            element.innerHTML = '<div class="loading">Loading data...</div>';
+        }
+
+        // Show error state
+        function showError(element, message) {
+            element.innerHTML = `
+                <div class="error">
+                    <p>${message}</p>
+                    <button onclick="window.location.reload()">Refresh Page</button>
+                </div>
+            `;
+        }
+
+        // Fetch countries for dropdown
+        async function fetchCountries() {
+            try {
+                showLoading(countrySelect);
+                const response = await fetch(API_BASE + 'countries');
+                if (!response.ok) throw new Error('API request failed');
+                const countries = await response.json();
+                
+                countries.sort((a, b) => a.country.localeCompare(b.country));
+                
+                countrySelect.innerHTML = '<option value="">Select a Country</option>';
+                countries.forEach(country => {
+                    const option = document.createElement('option');
+                    option.value = country.countryInfo?.iso3 || country.country;
+                    option.textContent = country.country;
+                    option.dataset.iso2 = country.countryInfo?.iso2;
+                    countrySelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error fetching countries:', error);
+                showError(countrySelect, 'Failed to load country list. Please try again later.');
+            }
+        }
+
+        // Fetch global statistics
+        async function fetchGlobalStats() {
+            try {
+                showLoading(globalStatsDiv);
+                const response = await fetch(API_BASE + 'all');
+                if (!response.ok) throw new Error('API request failed');
+                const globalStats = await response.json();
+                
+                globalStatsDiv.innerHTML = `
+                    <div class="stat-box confirmed">
+                        <h3>Total Confirmed</h3>
+                        <p>${globalStats.cases?.toLocaleString() || 'N/A'}</p>
+                    </div>
+                    <div class="stat-box deaths">
+                        <h3>Total Deaths</h3>
+                        <p>${globalStats.deaths?.toLocaleString() || 'N/A'}</p>
+                    </div>
+                    <div class="stat-box recovered">
+                        <h3>Total Recovered</h3>
+                        <p>${globalStats.recovered?.toLocaleString() || 'N/A'}</p>
+                    </div>
+                    <div class="stat-box active">
+                        <h3>Active Cases</h3>
+                        <p>${globalStats.active?.toLocaleString() || 'N/A'}</p>
+                    </div>
+                `;
+                
+                globalLastUpdated.textContent = `Last updated: ${formatDate(globalStats.updated)}`;
+            } catch (error) {
+                console.error('Error fetching global stats:', error);
+                showError(globalStatsDiv, 'Could not load global data. The API might be temporarily unavailable.');
+            }
+        }
+
+        // Fetch country statistics
+        async function fetchCountryStats(countryCode) {
+            if (!countryCode) {
+                countryStatsDiv.innerHTML = '';
+                countryLastUpdated.textContent = '';
+                return;
+            }
+            
+            try {
+                showLoading(countryStatsDiv);
+                const response = await fetch(API_BASE + `countries/${countryCode}`);
+                if (!response.ok) throw new Error('API request failed');
+                const countryData = await response.json();
+                
+                countryStatsDiv.innerHTML = `
+                    <div class="stat-box confirmed">
+                        <h3>Confirmed Cases</h3>
+                        <p>${countryData.cases?.toLocaleString() || 'N/A'}</p>
+                    </div>
+                    <div class="stat-box deaths">
+                        <h3>Deaths</h3>
+                        <p>${countryData.deaths?.toLocaleString() || 'N/A'}</p>
+                    </div>
+                    <div class="stat-box recovered">
+                        <h3>Recovered</h3>
+                        <p>${countryData.recovered?.toLocaleString() || 'N/A'}</p>
+                    </div>
+                    <div class="stat-box active">
+                        <h3>Active Cases</h3>
+                        <p>${countryData.active?.toLocaleString() || 'N/A'}</p>
+                    </div>
+                `;
+                
+                countryLastUpdated.textContent = `Last updated: ${formatDate(countryData.updated)}`;
+            } catch (error) {
+                console.error('Error fetching country stats:', error);
+                showError(countryStatsDiv, 'Could not load country data. Please try another country or check back later.');
+            }
+        }
+
+        // Event Listeners
+        countrySelect.addEventListener('change', (e) => {
+            fetchCountryStats(e.target.value);
+        });
+
+        refreshBtn.addEventListener('click', () => {
+            fetchGlobalStats();
+            fetchCountries();
+            if (countrySelect.value) {
+                fetchCountryStats(countrySelect.value);
+            }
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchCountries();
+            fetchGlobalStats();
+        });
+    </script>
+</body>
+</html>
